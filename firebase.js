@@ -11,7 +11,8 @@ import {
   query,
   where,
   getDocs,
-  addDoc
+  addDoc,
+  deleteDoc // Add this import
 } from "firebase/firestore";
 
 // Your web app's Firebase configuration
@@ -42,5 +43,6 @@ export {
   query,
   where,
   getDocs,
-  addDoc
+  addDoc,
+  deleteDoc // Add this export
 };

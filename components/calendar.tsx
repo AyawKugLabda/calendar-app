@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { db, collection, addDoc, getDocs, doc, setDoc } from '../firebase' // Import Firestore functions
+import { db, collection, addDoc, getDocs, doc, setDoc, deleteDoc } from '../firebase' // Import Firestore functions
 
 const daysOfWeek = ['SUN', 'MON', 'TUE', 'WED', 'THUR', 'FRI', 'SAT']
 const months = [
@@ -34,7 +34,7 @@ interface Task {
   completed: boolean
 }
 
-export function CalendarComponent() {
+export default function CalendarComponent() {
   const [currentDate, setCurrentDate] = useState(new Date())
   const [tasks, setTasks] = useState<Task[]>([])
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -48,7 +48,7 @@ export function CalendarComponent() {
   })
   const [newTag, setNewTag] = useState<Omit<Tag, 'id'>>({ name: '', color: '#808080' })
   const [allTags, setAllTags] = useState<Tag[]>([])
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [taskFilter, setTaskFilter] = useState('all')
 
   useEffect(() => {
@@ -123,7 +123,6 @@ export function CalendarComponent() {
   const handleNewTagInput = async () => {
     const trimmedTagName = newTag.name.trim()
     if (trimmedTagName && !allTags.some(tag => tag.name.toLowerCase() === trimmedTagName.toLowerCase())) {
-      // Add new tag to Firestore
       try {
         const tagsCollection = collection(db, 'tags')
         const newTagRef = await addDoc(tagsCollection, {
@@ -182,13 +181,31 @@ export function CalendarComponent() {
   const addOrUpdateTask = async () => {
     if (selectedTask) {
       // Update existing task in Firestore
-      // Implement update logic here
+      try {
+        const taskRef = doc(db, 'tasks', selectedTask.id);
+        await setDoc(taskRef, {
+          name: selectedTask.name,
+          date: selectedTask.date,
+          time: selectedTask.time,
+          description: selectedTask.description,
+          tags: selectedTask.tags.map(tag => ({ id: tag.id, name: tag.name, color: tag.color })),
+          completed: selectedTask.completed
+        }, { merge: true });
+
+        // Update the task in local state
+        setTasks(prev => prev.map(task => 
+          task.id === selectedTask.id ? selectedTask : task
+        ));
+
+        console.log("Task updated successfully");
+      } catch (error) {
+        console.error("Error updating task: ", error);
+      }
     } else if (newTask.name && newTask.date) {
       const taskDate = new Date(newTask.date)
       taskDate.setMinutes(taskDate.getMinutes() - taskDate.getTimezoneOffset())
       const formattedDate = taskDate.toISOString().split('T')[0]
       
-      // Add new task to Firestore
       try {
         const tasksCollection = collection(db, 'tasks')
         const newTaskRef = await addDoc(tasksCollection, {
@@ -200,7 +217,6 @@ export function CalendarComponent() {
           completed: false
         })
         
-        // Update local state
         const addedTask = {
           id: newTaskRef.id,
           ...newTask,
@@ -217,12 +233,22 @@ export function CalendarComponent() {
     closeModal()
   }
 
-  const deleteTask = () => {
+  const deleteTask = async () => {
     if (selectedTask) {
-      setTasks(prev => prev.filter(task => task.id !== selectedTask.id))
-      closeModal()
+      try {
+        // Delete the task from Firestore
+        await deleteDoc(doc(db, 'tasks', selectedTask.id));
+        
+        // Remove the task from local state
+        setTasks(prev => prev.filter(task => task.id !== selectedTask.id));
+        
+        console.log("Task deleted successfully");
+        closeModal();
+      } catch (error) {
+        console.error("Error deleting task: ", error);
+      }
     }
-  }
+  };
 
   const openTaskModal = (task: Task) => {
     setSelectedTask(task)
@@ -285,10 +311,10 @@ export function CalendarComponent() {
   }
 
   return (
-    <div className="flex h-screen bg-gray-50 font-['Space_Mono']">
-      <div className={`flex-1 p-4 overflow-auto transition-all duration-300 ${isSidebarOpen ? 'mr-64' : 'mr-12'}`}>
-        <div className="flex justify-between items-center mb-4">
-          <h1 className="text-2xl font-bold text-gray-800">
+    <div className="flex flex-col md:flex-row h-screen bg-gray-50 font-['Space_Mono']">
+      <div className={`flex-1 p-4 overflow-auto transition-all duration-300 ${isSidebarOpen ? 'md:mr-64' : ''}`}>
+        <div className="flex flex-col md:flex-row justify-between items-center mb-4 space-y-2 md:space-y-0">
+          <h1 className="text-xl md:text-2xl font-bold text-gray-800">
             {months[currentDate.getMonth()]}, {currentDate.getFullYear()}
           </h1>
           <div className="flex items-center space-x-2">
@@ -298,7 +324,7 @@ export function CalendarComponent() {
             <Button onClick={nextMonth} size="icon" variant="outline">
               <ChevronRight className="h-4 w-4" />
             </Button>
-            <Button onClick={openNewTaskModal} variant="outline">
+            <Button onClick={openNewTaskModal} variant="outline" className="whitespace-nowrap">
               <Plus className="h-4 w-4 mr-2" />
               Add task
             </Button>
@@ -306,7 +332,7 @@ export function CalendarComponent() {
         </div>
         <div className="grid grid-cols-7 gap-px bg-gray-200">
           {daysOfWeek.map(day => (
-            <div key={day} className="text-center font-semibold p-2 bg-white text-sm text-gray-600">{day}</div>
+            <div key={day} className="text-center font-semibold p-2 bg-white text-xs md:text-sm text-gray-600">{day}</div>
           ))}
           {Array.from({ length: startingDayOfWeek }).map((_, index) => (
             <div key={`empty-${index}`} className="p-2 bg-white"></div>
@@ -319,22 +345,22 @@ export function CalendarComponent() {
             const isToday = date.toDateString() === new Date().toDateString()
             
             return (
-              <div key={index} className={`border-t border-l p-2 bg-white min-h-[120px] ${isToday ? 'bg-blue-50' : ''}`}>
-                <div className={`font-semibold ${isToday ? 'text-blue-600' : 'text-gray-600'} mb-1`}>{index + 1}</div>
+              <div key={index} className={`border-t border-l p-1 md:p-2 bg-white min-h-[80px] md:min-h-[120px] ${isToday ? 'bg-blue-50' : ''}`}>
+                <div className={`font-semibold ${isToday ? 'text-blue-600' : 'text-gray-600'} mb-1 text-xs md:text-sm`}>{index + 1}</div>
                 <div className="space-y-1">
-                  {dayTasks.map(task => (
+                  {dayTasks.slice(0, 2).map(task => (
                     <div
                       key={task.id}
-                      className="text-xs p-1 rounded bg-white border border-gray-200 shadow-sm cursor-pointer hover:bg-gray-50"
+                      className="text-[10px] md:text-xs p-1 rounded bg-white border border-gray-200 shadow-sm cursor-pointer hover:bg-gray-50"
                       onClick={() => openTaskModal(task)}
                     >
-                      <div className={`font-semibold ${task.completed ? 'line-through text-gray-400' : ''}`}>{task.name}</div>
-                      <div className="text-gray-500">{task.time}</div>
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {task.tags.map(tag => (
+                      <div className={`font-semibold truncate ${task.completed ? 'line-through text-gray-400' : ''}`}>{task.name}</div>
+                      <div className="text-gray-500 hidden md:block">{task.time}</div>
+                      <div className="flex flex-wrap gap-1 mt-1 hidden md:flex">
+                        {task.tags.slice(0, 2).map(tag => (
                           <span
                             key={tag.id}
-                            className="text-white px-1 py-0.5 rounded text-[10px]"
+                            className="text-white px-1 py-0.5 rounded text-[8px] md:text-[10px]"
                             style={{ backgroundColor: tag.color }}
                           >
                             {tag.name}
@@ -343,22 +369,22 @@ export function CalendarComponent() {
                       </div>
                     </div>
                   ))}
+                  {dayTasks.length > 2 && (
+                    <div className="text-[10px] md:text-xs text-gray-500">+{dayTasks.length - 2} more</div>
+                  )}
                 </div>
               </div>
             )
           })}
         </div>
       </div>
-      <div className={`fixed right-0 top-0 h-full bg-white border-l border-gray-200 transition-all duration-300 ease-in-out ${isSidebarOpen ? 'w-64' : 'w-12'}`}>
+      <div className={`fixed inset-y-0 right-0 z-20 w-64 bg-white border-l border-gray-200 transition-transform duration-300 ease-in-out transform ${isSidebarOpen ? 'translate-x-0' : 'translate-x-full'} md:relative md:translate-x-0 ${isSidebarOpen ? 'md:w-64' : 'md:w-12'}`}>
         <Button
           variant="ghost"
+          
           size="sm"
           onClick={toggleSidebar}
-          className={`absolute top-4 p-2 hover:bg-gray-100 ${
-            isSidebarOpen
-              ? 'right-4'
-              : 'left-2'
-          }`}
+          className="absolute top-4 -left-10 md:left-2 p-2 bg-white border border-gray-200 rounded-l md:rounded"
           aria-label={isSidebarOpen ? "Close sidebar" : "Open sidebar"}
         >
           <Menu className="h-6 w-6" />
@@ -426,14 +452,13 @@ export function CalendarComponent() {
               <Input
                 id="date"
                 name="date"
-                
                 type="date"
                 value={selectedTask ? selectedTask.date : newTask.date}
                 onChange={handleInputChange}
                 className="col-span-3"
               />
             </div>
-            <div className="grid  grid-cols-4  items-center gap-4">
+            <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="time" className="text-right">
                 Time
               </Label>
