@@ -79,36 +79,43 @@ export function CalendarComponent() {
   }
 
   const handleTagSelect = (tagName: string) => {
-    const selectedTag = allTags.find(tag => tag.name === tagName)
+    const selectedTag = allTags.find(tag => tag.name === tagName);
     if (selectedTag) {
       if (selectedTask) {
         setSelectedTask(prev => ({
-          ...prev,
-          tags: [...prev.tags, selectedTag]
-        }))
+          ...prev!,
+          tags: [...prev!.tags, selectedTag]
+        }));
       } else {
         setNewTask(prev => ({
           ...prev,
           tags: [...prev.tags, selectedTag]
-        }))
+        }));
       }
     }
-  }
+  };
+
 
   const handleNewTagInput = () => {
-    if (newTag.name && !allTags.some(tag => tag.name === newTag.name)) {
-      const updatedAllTags = [...allTags, { ...newTag }]
-      setAllTags(updatedAllTags)
+    const trimmedTagName = newTag.name.trim()
+    if (trimmedTagName && !allTags.some(tag => tag.name.toLowerCase() === trimmedTagName.toLowerCase())) {
+      const newTagObject = { name: trimmedTagName, color: newTag.color }
+      setAllTags(prev => [...prev, newTagObject])
       
       if (selectedTask) {
-        setSelectedTask(prev => ({
-          ...prev,
-          tags: [...prev.tags, { ...newTag }]
-        }))
+        setSelectedTask(prev => {
+          if (prev) {
+            return {
+              ...prev,
+              tags: [...prev.tags, newTagObject]
+            }
+          }
+          return null
+        })
       } else {
         setNewTask(prev => ({
           ...prev,
-          tags: [...prev.tags, { ...newTag }]
+          tags: [...prev.tags, newTagObject]
         }))
       }
       
@@ -117,15 +124,22 @@ export function CalendarComponent() {
   }
 
   const removeTag = (tagToRemove: string) => {
+    const updateTags = (prevTags: Tag[]) => prevTags.filter(tag => tag.name !== tagToRemove)
+
     if (selectedTask) {
-      setSelectedTask(prev => ({
-        ...prev,
-        tags: prev.tags.filter(tag => tag.name !== tagToRemove)
-      }))
+      setSelectedTask(prev => {
+        if (prev) {
+          return {
+            ...prev,
+            tags: updateTags(prev.tags)
+          }
+        }
+        return null
+      })
     } else {
       setNewTask(prev => ({
         ...prev,
-        tags: prev.tags.filter(tag => tag.name !== tagToRemove)
+        tags: updateTags(prev.tags)
       }))
     }
   }
