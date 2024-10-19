@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { db, collection, addDoc, getDocs, doc, setDoc } from '../firebase' // Import Firestore functions
 
 const daysOfWeek = ['SUN', 'MON', 'TUE', 'WED', 'THUR', 'FRI', 'SAT']
 const months = [
@@ -18,12 +19,13 @@ const months = [
 ]
 
 interface Tag {
+  id: string
   name: string
   color: string
 }
 
 interface Task {
-  id: number
+  id: string
   name: string
   date: string
   time: string
@@ -44,7 +46,7 @@ export function CalendarComponent() {
     description: '',
     tags: []
   })
-  const [newTag, setNewTag] = useState<Tag>({ name: '', color: '#808080' })
+  const [newTag, setNewTag] = useState<Omit<Tag, 'id'>>({ name: '', color: '#808080' })
   const [allTags, setAllTags] = useState<Tag[]>([])
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const [taskFilter, setTaskFilter] = useState('all')
@@ -52,9 +54,32 @@ export function CalendarComponent() {
   useEffect(() => {
     const tags = tasks.flatMap(task => task.tags)
     const uniqueTags = Array.from(new Set(tags.map(tag => JSON.stringify(tag))))
-      .map(str => JSON.parse(str) as Tag)
+      .map(str => {
+        try {
+          return JSON.parse(str) as Tag
+        } catch (error) {
+          console.error("Error parsing tag:", str, error)
+          return null
+        }
+      })
+      .filter((tag): tag is Tag => tag !== null)
     setAllTags(uniqueTags)
   }, [tasks])
+
+  useEffect(() => {
+    // Fetch tasks from Firestore when component mounts
+    const fetchTasks = async () => {
+      const tasksCollection = collection(db, 'tasks')
+      const taskSnapshot = await getDocs(tasksCollection)
+      const taskList = taskSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Task[]
+      setTasks(taskList)
+    }
+
+    fetchTasks()
+  }, [])
 
   const firstDayOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1)
   const lastDayOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0)
@@ -95,31 +120,41 @@ export function CalendarComponent() {
     }
   };
 
-
-  const handleNewTagInput = () => {
+  const handleNewTagInput = async () => {
     const trimmedTagName = newTag.name.trim()
     if (trimmedTagName && !allTags.some(tag => tag.name.toLowerCase() === trimmedTagName.toLowerCase())) {
-      const newTagObject = { name: trimmedTagName, color: newTag.color }
-      setAllTags(prev => [...prev, newTagObject])
-      
-      if (selectedTask) {
-        setSelectedTask(prev => {
-          if (prev) {
-            return {
-              ...prev,
-              tags: [...prev.tags, newTagObject]
-            }
-          }
-          return null
+      // Add new tag to Firestore
+      try {
+        const tagsCollection = collection(db, 'tags')
+        const newTagRef = await addDoc(tagsCollection, {
+          name: trimmedTagName,
+          color: newTag.color
         })
-      } else {
-        setNewTask(prev => ({
-          ...prev,
-          tags: [...prev.tags, newTagObject]
-        }))
+        
+        const newTagObject = { id: newTagRef.id, name: trimmedTagName, color: newTag.color }
+        setAllTags(prev => [...prev, newTagObject])
+        
+        if (selectedTask) {
+          setSelectedTask(prev => {
+            if (prev) {
+              return {
+                ...prev,
+                tags: [...prev.tags, newTagObject]
+              }
+            }
+            return null
+          })
+        } else {
+          setNewTask(prev => ({
+            ...prev,
+            tags: [...prev.tags, newTagObject]
+          }))
+        }
+        
+        setNewTag({ name: '', color: '#808080' })
+      } catch (error) {
+        console.error("Error adding new tag: ", error)
       }
-      
-      setNewTag({ name: '', color: '#808080' })
     }
   }
 
@@ -144,14 +179,40 @@ export function CalendarComponent() {
     }
   }
 
-  const addOrUpdateTask = () => {
+  const addOrUpdateTask = async () => {
     if (selectedTask) {
-      setTasks(prev => prev.map(task => task.id === selectedTask.id ? selectedTask : task))
+      // Update existing task in Firestore
+      // Implement update logic here
     } else if (newTask.name && newTask.date) {
       const taskDate = new Date(newTask.date)
       taskDate.setMinutes(taskDate.getMinutes() - taskDate.getTimezoneOffset())
       const formattedDate = taskDate.toISOString().split('T')[0]
-      setTasks(prev => [...prev, { ...newTask, date: formattedDate, id: Date.now(), completed: false }])
+      
+      // Add new task to Firestore
+      try {
+        const tasksCollection = collection(db, 'tasks')
+        const newTaskRef = await addDoc(tasksCollection, {
+          name: newTask.name,
+          date: formattedDate,
+          time: newTask.time,
+          description: newTask.description,
+          tags: newTask.tags.map(tag => ({ id: tag.id, name: tag.name, color: tag.color })),
+          completed: false
+        })
+        
+        // Update local state
+        const addedTask = {
+          id: newTaskRef.id,
+          ...newTask,
+          date: formattedDate,
+          completed: false
+        }
+        setTasks(prev => [...prev, addedTask])
+        
+        console.log("Task added with ID: ", newTaskRef.id)
+      } catch (error) {
+        console.error("Error adding task: ", error)
+      }
     }
     closeModal()
   }
@@ -194,7 +255,7 @@ export function CalendarComponent() {
     })
   }
 
-  const toggleTaskCompletion = (taskId: number) => {
+  const toggleTaskCompletion = (taskId: string) => {
     setTasks(prev => prev.map(task => 
       task.id === taskId ? { ...task, completed: !task.completed } : task
     ))
@@ -272,7 +333,7 @@ export function CalendarComponent() {
                       <div className="flex flex-wrap gap-1 mt-1">
                         {task.tags.map(tag => (
                           <span
-                            key={tag.name}
+                            key={tag.id}
                             className="text-white px-1 py-0.5 rounded text-[10px]"
                             style={{ backgroundColor: tag.color }}
                           >
@@ -408,7 +469,7 @@ export function CalendarComponent() {
                   </SelectTrigger>
                   <SelectContent>
                     {allTags.map(tag => (
-                      <SelectItem key={tag.name} value={tag.name}>
+                      <SelectItem key={tag.id} value={tag.name}>
                         <div className="flex items-center">
                           <span className="text-white text-xs px-2 py-0.5 rounded mr-2" style={{ backgroundColor: tag.color }}>{tag.name}</span>
                         </div>
@@ -437,7 +498,7 @@ export function CalendarComponent() {
                 <div className="flex flex-wrap gap-2">
                   {(selectedTask ? selectedTask.tags : newTask.tags).map(tag => (
                     <span
-                      key={tag.name}
+                      key={tag.id}
                       className="text-white text-xs font-semibold px-2 py-0.5 rounded flex items-center"
                       style={{ backgroundColor: tag.color }}
                     >
