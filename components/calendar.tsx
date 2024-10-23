@@ -10,7 +10,10 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { db, collection, addDoc, getDocs, doc, setDoc, deleteDoc } from '../firebase' // Import Firestore functions
+import { db, collection, addDoc, getDocs, doc, setDoc, deleteDoc } from '../firebase'
+import dynamic from 'next/dynamic'
+
+const RenderDate = dynamic(() => import('./RenderDate'), { ssr: false })
 
 const daysOfWeek = ['SUN', 'MON', 'TUE', 'WED', 'THUR', 'FRI', 'SAT']
 const months = [
@@ -35,7 +38,10 @@ interface Task {
 }
 
 export default function CalendarComponent() {
-  const [currentDate, setCurrentDate] = useState(new Date())
+  const [currentDate, setCurrentDate] = useState(() => {
+    const now = new Date()
+    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+  })
   const [tasks, setTasks] = useState<Task[]>([])
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
@@ -67,31 +73,34 @@ export default function CalendarComponent() {
   }, [tasks])
 
   useEffect(() => {
-    // Fetch tasks from Firestore when component mounts
     const fetchTasks = async () => {
       const tasksCollection = collection(db, 'tasks')
       const taskSnapshot = await getDocs(tasksCollection)
-      const taskList = taskSnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Task[]
+      const taskList = taskSnapshot.docs.map(doc => {
+        const data = doc.data()
+        return {
+          id: doc.id,
+          ...data,
+          date: new Date(data.date).toISOString().split('T')[0], // Ensure date is in YYYY-MM-DD format
+        }
+      }) as Task[]
       setTasks(taskList)
     }
 
     fetchTasks()
   }, [])
 
-  const firstDayOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1)
-  const lastDayOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0)
-  const daysInMonth = lastDayOfMonth.getDate()
-  const startingDayOfWeek = firstDayOfMonth.getDay()
+  const firstDayOfMonth = new Date(Date.UTC(currentDate.getUTCFullYear(), currentDate.getUTCMonth(), 1))
+  const lastDayOfMonth = new Date(Date.UTC(currentDate.getUTCFullYear(), currentDate.getUTCMonth() + 1, 0))
+  const daysInMonth = lastDayOfMonth.getUTCDate()
+  const startingDayOfWeek = firstDayOfMonth.getUTCDay()
 
   const prevMonth = () => {
-    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1))
+    setCurrentDate(new Date(Date.UTC(currentDate.getUTCFullYear(), currentDate.getUTCMonth() - 1, 1)))
   }
 
   const nextMonth = () => {
-    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1))
+    setCurrentDate(new Date(Date.UTC(currentDate.getUTCFullYear(), currentDate.getUTCMonth() + 1, 1)))
   }
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -180,9 +189,9 @@ export default function CalendarComponent() {
 
   const addOrUpdateTask = async () => {
     if (selectedTask) {
-      // Update existing task in Firestore
+      // Update existing task
       try {
-        const taskRef = doc(db, 'tasks', selectedTask.id);
+        const taskRef = doc(db, 'tasks', selectedTask.id)
         await setDoc(taskRef, {
           name: selectedTask.name,
           date: selectedTask.date,
@@ -190,21 +199,20 @@ export default function CalendarComponent() {
           description: selectedTask.description,
           tags: selectedTask.tags.map(tag => ({ id: tag.id, name: tag.name, color: tag.color })),
           completed: selectedTask.completed
-        }, { merge: true });
+        }, { merge: true })
 
-        // Update the task in local state
         setTasks(prev => prev.map(task => 
           task.id === selectedTask.id ? selectedTask : task
-        ));
+        ))
 
-        console.log("Task updated successfully");
+        console.log("Task updated successfully")
       } catch (error) {
-        console.error("Error updating task: ", error);
+        console.error("Error updating task: ", error)
       }
     } else if (newTask.name && newTask.date) {
+      // Add new task
       const taskDate = new Date(newTask.date)
-      taskDate.setMinutes(taskDate.getMinutes() - taskDate.getTimezoneOffset())
-      const formattedDate = taskDate.toISOString().split('T')[0]
+      const formattedDate = taskDate.toISOString().split('T')[0] // Ensure date is in YYYY-MM-DD format
       
       try {
         const tasksCollection = collection(db, 'tasks')
@@ -315,7 +323,7 @@ export default function CalendarComponent() {
       <div className={`flex-1 p-4 overflow-auto transition-all duration-300 ${isSidebarOpen ? 'md:mr-64' : ''}`}>
         <div className="flex flex-col md:flex-row justify-between items-center mb-4 space-y-2 md:space-y-0">
           <h1 className="text-xl md:text-2xl font-bold text-gray-800">
-            {months[currentDate.getMonth()]}, {currentDate.getFullYear()}
+            {months[currentDate.getUTCMonth()]}, {currentDate.getUTCFullYear()}
           </h1>
           <div className="flex items-center space-x-2">
             <Button onClick={prevMonth} size="icon" variant="outline">
@@ -338,15 +346,16 @@ export default function CalendarComponent() {
             <div key={`empty-${index}`} className="p-2 bg-white"></div>
           ))}
           {Array.from({ length: daysInMonth }).map((_, index) => {
-            const date = new Date(currentDate.getFullYear(), currentDate.getMonth(), index + 1)
-            date.setMinutes(date.getMinutes() - date.getTimezoneOffset())
+            const date = new Date(Date.UTC(currentDate.getUTCFullYear(), currentDate.getUTCMonth(), index + 1))
             const dateString = date.toISOString().split('T')[0]
             const dayTasks = tasks.filter(task => task.date === dateString)
-            const isToday = date.toDateString() === new Date().toDateString()
+            const isToday = dateString === new Date().toISOString().split('T')[0]
             
             return (
               <div key={index} className={`border-t border-l p-1 md:p-2 bg-white min-h-[80px] md:min-h-[120px] ${isToday ? 'bg-blue-50' : ''}`}>
-                <div className={`font-semibold ${isToday ? 'text-blue-600' : 'text-gray-600'} mb-1 text-xs md:text-sm`}>{index + 1}</div>
+                <div className={`font-semibold ${isToday ? 'text-blue-600' : 'text-gray-600'} mb-1 text-xs md:text-sm`}>
+                  {index + 1}
+                </div>
                 <div className="space-y-1">
                   {dayTasks.slice(0, 2).map(task => (
                     <div
