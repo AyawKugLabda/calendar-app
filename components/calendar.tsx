@@ -46,10 +46,22 @@ const formatTime = (time: string) => {
   return `${formattedHour}:${minutes} ${ampm}`;
 };
 
+// Add these helper functions at the top of the file
+const toLocalISOString = (date: Date) => {
+  const offset = date.getTimezoneOffset() * 60000;
+  const localISOTime = (new Date(date.getTime() - offset)).toISOString().slice(0, -1);
+  return localISOTime.split('T')[0];
+};
+
+const fromUTCToLocal = (dateString: string) => {
+  const date = new Date(dateString);
+  return toLocalISOString(date);
+};
+
 export default function CalendarComponent() {
   const [currentDate, setCurrentDate] = useState(() => {
     const now = new Date()
-    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate())
   })
   const [tasks, setTasks] = useState<Task[]>([])
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -89,27 +101,41 @@ export default function CalendarComponent() {
     const fetchTasks = async () => {
       const tasksCollection = collection(db, 'tasks')
       const taskSnapshot = await getDocs(tasksCollection)
-      const taskList = taskSnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Task[]
+      const taskList = taskSnapshot.docs.map(doc => {
+        const data = doc.data() as Task;
+        return {
+          ...data,
+          id: doc.id,
+          date: fromUTCToLocal(data.date) // Convert UTC date to local date
+        };
+      });
       setTasks(taskList)
     }
 
     fetchTasks()
   }, [])
 
-  const firstDayOfMonth = new Date(Date.UTC(currentDate.getUTCFullYear(), currentDate.getUTCMonth(), 1))
-  const lastDayOfMonth = new Date(Date.UTC(currentDate.getUTCFullYear(), currentDate.getUTCMonth() + 1, 0))
-  const daysInMonth = lastDayOfMonth.getUTCDate()
-  const startingDayOfWeek = firstDayOfMonth.getUTCDay()
+  useEffect(() => {
+    // Update current date every day at midnight
+    const timer = setInterval(() => {
+      const now = new Date()
+      setCurrentDate(new Date(now.getFullYear(), now.getMonth(), now.getDate()))
+    }, 1000 * 60 * 60 * 24) // 24 hours
+
+    return () => clearInterval(timer)
+  }, [])
+
+  const firstDayOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1)
+  const lastDayOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0)
+  const daysInMonth = lastDayOfMonth.getDate()
+  const startingDayOfWeek = firstDayOfMonth.getDay()
 
   const prevMonth = () => {
-    setCurrentDate(new Date(Date.UTC(currentDate.getUTCFullYear(), currentDate.getUTCMonth() - 1, 1)))
+    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1))
   }
 
   const nextMonth = () => {
-    setCurrentDate(new Date(Date.UTC(currentDate.getUTCFullYear(), currentDate.getUTCMonth() + 1, 1)))
+    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1))
   }
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -194,9 +220,13 @@ export default function CalendarComponent() {
   const addOrUpdateTask = async () => {
     if (selectedTask) {
       try {
-        await setDoc(doc(db, 'tasks', selectedTask.id), selectedTask)
+        const updatedTask = {
+          ...selectedTask,
+          date: toLocalISOString(new Date(selectedTask.date)) // Convert local date to UTC
+        };
+        await setDoc(doc(db, 'tasks', selectedTask.id), updatedTask)
         setTasks(prev => prev.map(task => 
-          task.id === selectedTask.id ? selectedTask : task
+          task.id === selectedTask.id ? updatedTask : task
         ))
       } catch (error) {
         console.error("Error updating task: ", error)
@@ -204,14 +234,15 @@ export default function CalendarComponent() {
     } else if (newTask.name && newTask.date) {
       try {
         const tasksCollection = collection(db, 'tasks')
-        const newTaskRef = await addDoc(tasksCollection, {
+        const taskToAdd = {
           ...newTask,
+          date: toLocalISOString(new Date(newTask.date)), // Convert local date to UTC
           completed: false
-        })
+        };
+        const newTaskRef = await addDoc(tasksCollection, taskToAdd)
         const addedTask = {
           id: newTaskRef.id,
-          ...newTask,
-          completed: false
+          ...taskToAdd
         }
         setTasks(prev => [...prev, addedTask])
       } catch (error) {
@@ -249,11 +280,10 @@ export default function CalendarComponent() {
 
   const openNewTaskModal = () => {
     const today = new Date()
-    today.setMinutes(today.getMinutes() - today.getTimezoneOffset())
     setSelectedTask(null)
     setNewTask({
       name: '',
-      date: today.toISOString().split('T')[0],
+      date: toLocalISOString(today),
       time: '',
       description: '',
       tags: []
@@ -307,7 +337,7 @@ export default function CalendarComponent() {
       <div className={`flex-1 p-4 overflow-auto transition-all duration-300 ${isSidebarOpen ? 'md:mr-0' : ''}`}>
         <div className="flex flex-col md:flex-row justify-between items-center mb-4 space-y-2 md:space-y-0">
           <h1 className="text-xl md:text-2xl font-bold text-gray-800">
-            {months[currentDate.getUTCMonth()]}, {currentDate.getUTCFullYear()}
+            {months[currentDate.getMonth()]}, {currentDate.getFullYear()}
           </h1>
           <div className="flex items-center space-x-2">
             <Button onClick={prevMonth} size="icon" variant="outline">
@@ -330,10 +360,10 @@ export default function CalendarComponent() {
             <div key={`empty-${index}`} className="p-2 bg-white"></div>
           ))}
           {Array.from({ length: daysInMonth }).map((_, index) => {
-            const date = new Date(Date.UTC(currentDate.getUTCFullYear(), currentDate.getUTCMonth(), index + 1))
-            const dateString = date.toISOString().split('T')[0]
+            const date = new Date(currentDate.getFullYear(), currentDate.getMonth(), index + 1)
+            const dateString = toLocalISOString(date)
             const dayTasks = tasks.filter(task => task.date === dateString)
-            const isToday = dateString === new Date().toISOString().split('T')[0]
+            const isToday = dateString === toLocalISOString(new Date())
             
             return (
               <div key={index} className={`border-t border-l p-1 md:p-2 bg-white min-h-[80px] md:min-h-[120px] ${isToday ? 'bg-blue-50' : ''}`}>
