@@ -110,21 +110,15 @@ export default function CalendarComponent() {
     const selectedTag = allTags.find(tag => tag.name === tagName);
     if (selectedTag) {
       if (selectedTask) {
-        // Check if the tag is already selected for the task
-        if (!selectedTask.tags.some(t => t.id === selectedTag.id)) {
-          setSelectedTask(prev => ({
-            ...prev!,
-            tags: [...prev!.tags, selectedTag]
-          }));
-        }
+        setSelectedTask(prev => ({
+          ...prev!,
+          tags: [...prev!.tags, selectedTag]
+        }));
       } else {
-        // Check if the tag is already selected for the new task
-        if (!newTask.tags.some(t => t.id === selectedTag.id)) {
-          setNewTask(prev => ({
-            ...prev,
-            tags: [...prev.tags, selectedTag]
-          }));
-        }
+        setNewTask(prev => ({
+          ...prev,
+          tags: [...prev.tags, selectedTag]
+        }));
       }
     }
   };
@@ -143,15 +137,10 @@ export default function CalendarComponent() {
         setAllTags(prev => [...prev, newTagObject])
         
         if (selectedTask) {
-          setSelectedTask(prev => {
-            if (prev) {
-              return {
-                ...prev,
-                tags: [...prev.tags, newTagObject]
-              }
-            }
-            return null
-          })
+          setSelectedTask(prev => ({
+            ...prev!,
+            tags: [...prev!.tags, newTagObject]
+          }))
         } else {
           setNewTask(prev => ({
             ...prev,
@@ -189,53 +178,29 @@ export default function CalendarComponent() {
 
   const addOrUpdateTask = async () => {
     if (selectedTask) {
-      // Update existing task in Firestore
       try {
-        const taskRef = doc(db, 'tasks', selectedTask.id);
-        await setDoc(taskRef, {
-          name: selectedTask.name,
-          date: selectedTask.date,
-          time: selectedTask.time,
-          description: selectedTask.description,
-          tags: selectedTask.tags.map(tag => ({ id: tag.id, name: tag.name, color: tag.color })),
-          completed: selectedTask.completed
-        }, { merge: true });
-
-        // Update the task in local state
+        await setDoc(doc(db, 'tasks', selectedTask.id), selectedTask)
         setTasks(prev => prev.map(task => 
           task.id === selectedTask.id ? selectedTask : task
-        ));
-
-        console.log("Task updated successfully");
+        ))
       } catch (error) {
-        console.error("Error updating task: ", error);
+        console.error("Error updating task: ", error)
       }
     } else if (newTask.name && newTask.date) {
-      const taskDate = new Date(newTask.date)
-      const formattedDate = taskDate.toISOString().split('T')[0] // Store date in YYYY-MM-DD format
-      
       try {
         const tasksCollection = collection(db, 'tasks')
         const newTaskRef = await addDoc(tasksCollection, {
-          name: newTask.name,
-          date: formattedDate,
-          time: newTask.time,
-          description: newTask.description,
-          tags: newTask.tags.map(tag => ({ id: tag.id, name: tag.name, color: tag.color })),
+          ...newTask,
           completed: false
         })
-        
         const addedTask = {
           id: newTaskRef.id,
           ...newTask,
-          date: formattedDate,
           completed: false
         }
         setTasks(prev => [...prev, addedTask])
-        
-        console.log("Task added with ID: ", newTaskRef.id)
       } catch (error) {
-        console.error("Error adding task: ", error)
+        console.error("Error adding new task: ", error)
       }
     }
     closeModal()
@@ -244,19 +209,14 @@ export default function CalendarComponent() {
   const deleteTask = async () => {
     if (selectedTask) {
       try {
-        // Delete the task from Firestore
-        await deleteDoc(doc(db, 'tasks', selectedTask.id));
-        
-        // Remove the task from local state
-        setTasks(prev => prev.filter(task => task.id !== selectedTask.id));
-        
-        console.log("Task deleted successfully");
-        closeModal();
+        await deleteDoc(doc(db, 'tasks', selectedTask.id))
+        setTasks(prev => prev.filter(task => task.id !== selectedTask.id))
+        closeModal()
       } catch (error) {
-        console.error("Error deleting task: ", error);
+        console.error("Error deleting task: ", error)
       }
     }
-  };
+  }
 
   const openTaskModal = (task: Task) => {
     setSelectedTask(task)
@@ -320,7 +280,7 @@ export default function CalendarComponent() {
 
   return (
     <div className="flex flex-col md:flex-row h-screen bg-gray-50 font-['Space_Mono']">
-      <div className={`flex-1 p-4 overflow-auto transition-all duration-300 ${isSidebarOpen ? 'md:mr-64' : ''}`}>
+      <div className={`flex-1 p-4 overflow-auto transition-all duration-300 ${isSidebarOpen ? 'md:mr-0' : ''}`}>
         <div className="flex flex-col md:flex-row justify-between items-center mb-4 space-y-2 md:space-y-0">
           <h1 className="text-xl md:text-2xl font-bold text-gray-800">
             {months[currentDate.getUTCMonth()]}, {currentDate.getUTCFullYear()}
@@ -383,27 +343,33 @@ export default function CalendarComponent() {
                       <PopoverTrigger asChild>
                         <Button 
                           variant="link" 
-                          className="text-[10px] md:text-xs text-gray-500 p-0 h-auto"
+                          className="text-[10px] md:text-xs text-primary p-0 h-auto font-semibold"
                         >
                           +{dayTasks.length - 2} more
                         </Button>
                       </PopoverTrigger>
-                      <PopoverContent className="w-64">
+                      <PopoverContent className="w-64 p-0">
+                        <div className="bg-primary text-primary-foreground p-2 font-semibold">
+                          {new Date(dateString).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                        </div>
                         <ScrollArea className="h-[300px]">
                           {dayTasks.map(task => (
                             <div 
                               key={task.id} 
-                              className="mb-2 p-2 border-b last:border-b-0"
+                              className="p-3 border-b last:border-b-0 hover:bg-muted/50 cursor-pointer"
                               onClick={() => openTaskModal(task)}
                             >
-                              <div className={`font-semibold ${task.completed ? 'line-through text-gray-400' : ''}`}>{task.name}</div>
-                              <div className="text-gray-500 text-xs">{task.time}</div>
-                              <div className="flex flex-wrap gap-1 mt-1">
+                              <div className="flex items-center justify-between mb-1">
+                                <div className={`font-semibold ${task.completed ? 'line-through text-muted-foreground' : ''}`}>{task.name}</div>
+                                <div className="text-xs text-muted-foreground">{task.time}</div>
+                              </div>
+                              <div className="text-xs text-muted-foreground mb-2 line-clamp-2">{task.description}</div>
+                              <div className="flex flex-wrap gap-1">
                                 {task.tags.map(tag => (
                                   <span
                                     key={tag.id}
-                                    className="text-white px-1 py-0.5 rounded text-[10px]"
-                                    style={{ backgroundColor: tag.color }}
+                                    className="text-[10px] px-1.5 py-0.5 rounded-full"
+                                    style={{ backgroundColor: tag.color, color: '#fff' }}
                                   >
                                     {tag.name}
                                   </span>
