@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
-import { ChevronLeft, ChevronRight, Plus, X, Menu } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, X, Menu, Edit } from 'lucide-react'
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -35,6 +35,17 @@ interface Task {
   completed: boolean
 }
 
+// Add this helper function at the top of the file, after the imports
+
+const formatTime = (time: string) => {
+  if (!time) return '';
+  const [hours, minutes] = time.split(':');
+  const hour = parseInt(hours, 10);
+  const ampm = hour >= 12 ? 'PM' : 'AM';
+  const formattedHour = hour % 12 || 12;
+  return `${formattedHour}:${minutes} ${ampm}`;
+};
+
 export default function CalendarComponent() {
   const [currentDate, setCurrentDate] = useState(() => {
     const now = new Date()
@@ -54,6 +65,10 @@ export default function CalendarComponent() {
   const [allTags, setAllTags] = useState<Tag[]>([])
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [taskFilter, setTaskFilter] = useState('all')
+  const [taskDetailsPopover, setTaskDetailsPopover] = useState<{ isOpen: boolean; task: Task | null }>({
+    isOpen: false,
+    task: null
+  })
 
   useEffect(() => {
     const fetchTags = async () => {
@@ -218,7 +233,16 @@ export default function CalendarComponent() {
     }
   }
 
+  const openTaskDetails = (task: Task) => {
+    setTaskDetailsPopover({ isOpen: true, task })
+  }
+
+  const closeTaskDetails = () => {
+    setTaskDetailsPopover({ isOpen: false, task: null })
+  }
+
   const openTaskModal = (task: Task) => {
+    closeTaskDetails()
     setSelectedTask(task)
     setIsModalOpen(true)
   }
@@ -318,25 +342,47 @@ export default function CalendarComponent() {
                 </div>
                 <div className="space-y-1">
                   {dayTasks.slice(0, 2).map(task => (
-                    <div
-                      key={task.id}
-                      className="text-[10px] md:text-xs p-1 rounded bg-white border border-gray-200 shadow-sm cursor-pointer hover:bg-gray-50"
-                      onClick={() => openTaskModal(task)}
-                    >
-                      <div className={`font-semibold truncate ${task.completed ? 'line-through text-gray-400' : ''}`}>{task.name}</div>
-                      <div className="text-gray-500 hidden md:block">{task.time}</div>
-                      <div className="flex flex-wrap gap-1 mt-1 hidden md:flex">
-                        {task.tags.slice(0, 2).map(tag => (
-                          <span
-                            key={tag.id}
-                            className="text-white px-1 py-0.5 rounded text-[8px] md:text-[10px]"
-                            style={{ backgroundColor: tag.color }}
-                          >
-                            {tag.name}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
+                    <Popover key={task.id}>
+                      <PopoverTrigger asChild>
+                        <div
+                          className="text-[10px] md:text-xs p-1 rounded bg-white border border-gray-200 shadow-sm cursor-pointer hover:bg-gray-50"
+                        >
+                          <div className={`font-semibold truncate ${task.completed ? 'line-through text-gray-400' : ''}`}>{task.name}</div>
+                          <div className="text-gray-500 hidden md:block">{formatTime(task.time)}</div>
+                          <div className="flex flex-wrap gap-1 mt-1 hidden md:flex">
+                            {task.tags.slice(0, 2).map(tag => (
+                              <span
+                                key={tag.id}
+                                className="text-white px-1 py-0.5 rounded text-[8px] md:text-[10px]"
+                                style={{ backgroundColor: tag.color }}
+                              >
+                                {tag.name}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-64 p-4">
+                        <h3 className="font-semibold mb-2">{task.name}</h3>
+                        <p className="text-sm text-gray-600 mb-2">{formatTime(task.time)}</p>
+                        <p className="text-sm mb-2">{task.description}</p>
+                        <div className="flex flex-wrap gap-1 mb-4">
+                          {task.tags.map(tag => (
+                            <span
+                              key={tag.id}
+                              className="text-white text-xs px-1.5 py-0.5 rounded-full"
+                              style={{ backgroundColor: tag.color }}
+                            >
+                              {tag.name}
+                            </span>
+                          ))}
+                        </div>
+                        <Button onClick={() => openTaskModal(task)} className="w-full">
+                          <Edit className="w-4 h-4 mr-2" />
+                          Edit Task
+                        </Button>
+                      </PopoverContent>
+                    </Popover>
                   ))}
                   {dayTasks.length > 2 && (
                     <Popover>
@@ -354,28 +400,50 @@ export default function CalendarComponent() {
                         </div>
                         <ScrollArea className="h-[300px]">
                           {dayTasks.map(task => (
-                            <div 
-                              key={task.id} 
-                              className="p-3 border-b last:border-b-0 hover:bg-muted/50 cursor-pointer"
-                              onClick={() => openTaskModal(task)}
-                            >
-                              <div className="flex items-center justify-between mb-1">
-                                <div className={`font-semibold ${task.completed ? 'line-through text-muted-foreground' : ''}`}>{task.name}</div>
-                                <div className="text-xs text-muted-foreground">{task.time}</div>
-                              </div>
-                              <div className="text-xs text-muted-foreground mb-2 line-clamp-2">{task.description}</div>
-                              <div className="flex flex-wrap gap-1">
-                                {task.tags.map(tag => (
-                                  <span
-                                    key={tag.id}
-                                    className="text-[10px] px-1.5 py-0.5 rounded-full"
-                                    style={{ backgroundColor: tag.color, color: '#fff' }}
-                                  >
-                                    {tag.name}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
+                            <Popover key={task.id}>
+                              <PopoverTrigger asChild>
+                                <div 
+                                  className="p-3 border-b last:border-b-0 hover:bg-muted/50 cursor-pointer"
+                                >
+                                  <div className="flex items-center justify-between mb-1">
+                                    <div className={`font-semibold ${task.completed ? 'line-through text-muted-foreground' : ''}`}>{task.name}</div>
+                                    <div className="text-xs text-muted-foreground">{formatTime(task.time)}</div>
+                                  </div>
+                                  <div className="text-xs text-muted-foreground mb-2 line-clamp-2">{task.description}</div>
+                                  <div className="flex flex-wrap gap-1">
+                                    {task.tags.map(tag => (
+                                      <span
+                                        key={tag.id}
+                                        className="text-[10px] px-1.5 py-0.5 rounded-full"
+                                        style={{ backgroundColor: tag.color, color: '#fff' }}
+                                      >
+                                        {tag.name}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-64 p-4">
+                                <h3 className="font-semibold mb-2">{task.name}</h3>
+                                <p className="text-sm text-gray-600 mb-2">{formatTime(task.time)}</p>
+                                <p className="text-sm mb-2">{task.description}</p>
+                                <div className="flex flex-wrap gap-1 mb-4">
+                                  {task.tags.map(tag => (
+                                    <span
+                                      key={tag.id}
+                                      className="text-white text-xs px-1.5 py-0.5 rounded-full"
+                                      style={{ backgroundColor: tag.color }}
+                                    >
+                                      {tag.name}
+                                    </span>
+                                  ))}
+                                </div>
+                                <Button onClick={() => openTaskModal(task)} className="w-full">
+                                  <Edit className="w-4 h-4 mr-2" />
+                                  Edit Task
+                                </Button>
+                              </PopoverContent>
+                            </Popover>
                           ))}
                         </ScrollArea>
                       </PopoverContent>
