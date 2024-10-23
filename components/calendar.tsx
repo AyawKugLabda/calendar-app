@@ -10,12 +10,10 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { db, collection, addDoc, getDocs, doc, setDoc, deleteDoc } from '../firebase'
-import dynamic from 'next/dynamic'
 
-const RenderDate = dynamic(() => import('./RenderDate'), { ssr: false })
-
-const daysOfWeek = ['SUN', 'MON', 'TUE', 'WED', 'THUR', 'FRI', 'SAT']
+const daysOfWeek = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT']
 const months = [
   'January', 'February', 'March', 'April', 'May', 'June', 
   'July', 'August', 'September', 'October', 'November', 'December'
@@ -58,32 +56,28 @@ export default function CalendarComponent() {
   const [taskFilter, setTaskFilter] = useState('all')
 
   useEffect(() => {
-    const tags = tasks.flatMap(task => task.tags)
-    const uniqueTags = Array.from(new Set(tags.map(tag => JSON.stringify(tag))))
-      .map(str => {
-        try {
-          return JSON.parse(str) as Tag
-        } catch (error) {
-          console.error("Error parsing tag:", str, error)
-          return null
-        }
-      })
-      .filter((tag): tag is Tag => tag !== null)
-    setAllTags(uniqueTags)
-  }, [tasks])
+    const fetchTags = async () => {
+      const tagsCollection = collection(db, 'tags')
+      const tagSnapshot = await getDocs(tagsCollection)
+      const tagList = tagSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Tag[]
+      setAllTags(tagList)
+    }
+
+    fetchTags()
+  }, [])
 
   useEffect(() => {
+    // Fetch tasks from Firestore when component mounts
     const fetchTasks = async () => {
       const tasksCollection = collection(db, 'tasks')
       const taskSnapshot = await getDocs(tasksCollection)
-      const taskList = taskSnapshot.docs.map(doc => {
-        const data = doc.data()
-        return {
-          id: doc.id,
-          ...data,
-          date: new Date(data.date).toISOString().split('T')[0], // Ensure date is in YYYY-MM-DD format
-        }
-      }) as Task[]
+      const taskList = taskSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Task[]
       setTasks(taskList)
     }
 
@@ -116,15 +110,21 @@ export default function CalendarComponent() {
     const selectedTag = allTags.find(tag => tag.name === tagName);
     if (selectedTag) {
       if (selectedTask) {
-        setSelectedTask(prev => ({
-          ...prev!,
-          tags: [...prev!.tags, selectedTag]
-        }));
+        // Check if the tag is already selected for the task
+        if (!selectedTask.tags.some(t => t.id === selectedTag.id)) {
+          setSelectedTask(prev => ({
+            ...prev!,
+            tags: [...prev!.tags, selectedTag]
+          }));
+        }
       } else {
-        setNewTask(prev => ({
-          ...prev,
-          tags: [...prev.tags, selectedTag]
-        }));
+        // Check if the tag is already selected for the new task
+        if (!newTask.tags.some(t => t.id === selectedTag.id)) {
+          setNewTask(prev => ({
+            ...prev,
+            tags: [...prev.tags, selectedTag]
+          }));
+        }
       }
     }
   };
@@ -189,9 +189,9 @@ export default function CalendarComponent() {
 
   const addOrUpdateTask = async () => {
     if (selectedTask) {
-      // Update existing task
+      // Update existing task in Firestore
       try {
-        const taskRef = doc(db, 'tasks', selectedTask.id)
+        const taskRef = doc(db, 'tasks', selectedTask.id);
         await setDoc(taskRef, {
           name: selectedTask.name,
           date: selectedTask.date,
@@ -199,20 +199,20 @@ export default function CalendarComponent() {
           description: selectedTask.description,
           tags: selectedTask.tags.map(tag => ({ id: tag.id, name: tag.name, color: tag.color })),
           completed: selectedTask.completed
-        }, { merge: true })
+        }, { merge: true });
 
+        // Update the task in local state
         setTasks(prev => prev.map(task => 
           task.id === selectedTask.id ? selectedTask : task
-        ))
+        ));
 
-        console.log("Task updated successfully")
+        console.log("Task updated successfully");
       } catch (error) {
-        console.error("Error updating task: ", error)
+        console.error("Error updating task: ", error);
       }
     } else if (newTask.name && newTask.date) {
-      // Add new task
       const taskDate = new Date(newTask.date)
-      const formattedDate = taskDate.toISOString().split('T')[0] // Ensure date is in YYYY-MM-DD format
+      const formattedDate = taskDate.toISOString().split('T')[0] // Store date in YYYY-MM-DD format
       
       try {
         const tasksCollection = collection(db, 'tasks')
@@ -379,7 +379,41 @@ export default function CalendarComponent() {
                     </div>
                   ))}
                   {dayTasks.length > 2 && (
-                    <div className="text-[10px] md:text-xs text-gray-500">+{dayTasks.length - 2} more</div>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button 
+                          variant="link" 
+                          className="text-[10px] md:text-xs text-gray-500 p-0 h-auto"
+                        >
+                          +{dayTasks.length - 2} more
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-64">
+                        <ScrollArea className="h-[300px]">
+                          {dayTasks.map(task => (
+                            <div 
+                              key={task.id} 
+                              className="mb-2 p-2 border-b last:border-b-0"
+                              onClick={() => openTaskModal(task)}
+                            >
+                              <div className={`font-semibold ${task.completed ? 'line-through text-gray-400' : ''}`}>{task.name}</div>
+                              <div className="text-gray-500 text-xs">{task.time}</div>
+                              <div className="flex flex-wrap gap-1 mt-1">
+                                {task.tags.map(tag => (
+                                  <span
+                                    key={tag.id}
+                                    className="text-white px-1 py-0.5 rounded text-[10px]"
+                                    style={{ backgroundColor: tag.color }}
+                                  >
+                                    {tag.name}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </ScrollArea>
+                      </PopoverContent>
+                    </Popover>
                   )}
                 </div>
               </div>
@@ -390,7 +424,6 @@ export default function CalendarComponent() {
       <div className={`fixed inset-y-0 right-0 z-20 w-64 bg-white border-l border-gray-200 transition-transform duration-300 ease-in-out transform ${isSidebarOpen ? 'translate-x-0' : 'translate-x-full'} md:relative md:translate-x-0 ${isSidebarOpen ? 'md:w-64' : 'md:w-12'}`}>
         <Button
           variant="ghost"
-          
           size="sm"
           onClick={toggleSidebar}
           className="absolute top-4 -left-10 md:left-2 p-2 bg-white border border-gray-200 rounded-l md:rounded"
@@ -502,13 +535,18 @@ export default function CalendarComponent() {
                     <SelectValue placeholder="Select a tag" />
                   </SelectTrigger>
                   <SelectContent>
-                    {allTags.map(tag => (
-                      <SelectItem key={tag.id} value={tag.name}>
-                        <div className="flex items-center">
-                          <span className="text-white text-xs px-2 py-0.5 rounded mr-2" style={{ backgroundColor: tag.color }}>{tag.name}</span>
-                        </div>
-                      </SelectItem>
-                    ))}
+                    {allTags
+                      .filter(tag => {
+                        const currentTags = selectedTask ? selectedTask.tags : newTask.tags;
+                        return !currentTags.some(t => t.id === tag.id);
+                      })
+                      .map(tag => (
+                        <SelectItem key={tag.id} value={tag.name}>
+                          <div className="flex items-center">
+                            <span className="text-white text-xs px-2 py-0.5 rounded mr-2" style={{ backgroundColor: tag.color }}>{tag.name}</span>
+                          </div>
+                        </SelectItem>
+                      ))}
                   </SelectContent>
                 </Select>
                 <div className="flex items-center space-x-2">
